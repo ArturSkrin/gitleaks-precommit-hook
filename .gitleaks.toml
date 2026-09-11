@@ -1,19 +1,8 @@
-title = "gitleaks config for the pre-commit hook (extends the default rule set)"
-
 [extend]
-# Inherit all default gitleaks rules (AWS keys, private keys, generic API
-# keys, Slack/Stripe/GitHub tokens, etc.) and add our own on top.
 useDefault = true
 
-# ---------------------------------------------------------------------------
-# Telegram Bot API Token
-# Format: <bot_id: 8-10 digits>:<~34-35 chars A-Za-z0-9_->
-# Example from the official Telegram Bot API docs (a placeholder, not a real
-# token): 110201543:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw
-# https://core.telegram.org/bots/api
-# ---------------------------------------------------------------------------
+# Telegram Bot API token: <bot_id>:<~35 chars>
 [[rules]]
-id          = "telegram-bot-token"
-description = "Telegram Bot API Token"
-regex       = '''[0-9]{8,10}:[A-Za-z0-9_-]{30,45}'''
-tags        = ["telegram", "bot-token", "secret"]
+id = "telegram-bot-token"
+description = "Telegram Bot Token"
+regex = '''[0-9]{8,10}:[A-Za-z0-9_-]{30,45}'''

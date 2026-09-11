@@ -1,119 +1,26 @@
 #!/usr/bin/env bash
-#
-# pre-commit hook: scan staged changes for secrets with gitleaks and
-# reject the commit if any are found.
-#
-# Repo: https://github.com/ArturSkrin/gitleaks-precommit-hook
-#
-# Configurable via git config (all options have sane defaults):
-#   hooks.gitleaks.enable      true|false   # toggle the check (default: true)
-#   hooks.gitleaks.autoinstall true|false   # auto-install gitleaks if missing (default: true)
-#   hooks.gitleaks.installUrl  <url>        # source for the curl|sh installer
-#   hooks.gitleaks.version     <version>    # pin gitleaks version, e.g. "8.21.2" (default: latest)
-#
-set -u
+# Block commits containing secrets (gitleaks). Disable: git config hooks.gitleaks.enable false
 
-c_red()    { printf '\033[31m%s\033[0m\n' "$1"; }
-c_green()  { printf '\033[32m%s\033[0m\n' "$1"; }
-c_yellow() { printf '\033[33m%s\033[0m\n' "$1"; }
-c_bold()   { printf '\033[1m%s\033[0m\n' "$1"; }
-
-fail() {
-    echo
-    c_red "✗ COMMIT REJECTED"
-    c_red "  Reason: $1"
-    echo
-    exit 1
-}
-
-REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
-[ -n "$REPO_ROOT" ] || fail "not inside a git repository"
-cd "$REPO_ROOT" || fail "cannot cd into $REPO_ROOT"
-
-# Respect the enable/disable toggle
-ENABLE="$(git config --get hooks.gitleaks.enable 2>/dev/null || true)"
-if [ "$ENABLE" = "false" ] || [ "$ENABLE" = "0" ]; then
-    c_yellow "⚠ gitleaks pre-commit check disabled (hooks.gitleaks.enable=false) — skipping."
+if [ "$(git config --get hooks.gitleaks.enable)" = "false" ]; then
     exit 0
 fi
 
-AUTOINSTALL="$(git config --get hooks.gitleaks.autoinstall 2>/dev/null || true)"
-[ -n "$AUTOINSTALL" ] || AUTOINSTALL="true"
+root="$(git rev-parse --show-toplevel)"
 
-INSTALL_URL="$(git config --get hooks.gitleaks.installUrl 2>/dev/null || true)"
-
-# Auto-install gitleaks if it is not on PATH
 if ! command -v gitleaks >/dev/null 2>&1; then
-    if [ "$AUTOINSTALL" = "false" ] || [ "$AUTOINSTALL" = "0" ]; then
-        fail "gitleaks is not installed and autoinstall is off (hooks.gitleaks.autoinstall=false).
-  Install it manually: https://github.com/gitleaks/gitleaks#installing"
+    if [ "$(git config --get hooks.gitleaks.autoinstall)" = "false" ]; then
+        echo "gitleaks not installed and autoinstall is off." >&2
+        exit 1
     fi
-
-    c_yellow "gitleaks not found on PATH. Running auto-install..."
-
-    INSTALLER_LOCAL="$REPO_ROOT/scripts/install-gitleaks.sh"
-
-    if [ -n "$INSTALL_URL" ]; then
-        # Explicit URL wins: fetch and pipe to shell (curl | sh)
-        c_yellow "  -> curl -sSfL '$INSTALL_URL' | sh"
-        curl -sSfL "$INSTALL_URL" | sh || fail "failed to install gitleaks from $INSTALL_URL"
-    elif [ -f "$INSTALLER_LOCAL" ]; then
-        # Installer shipped with the repo (works right after clone)
-        c_yellow "  -> sh '$INSTALLER_LOCAL'"
-        sh "$INSTALLER_LOCAL" || fail "local install-gitleaks.sh failed"
-    else
-        fail "no hooks.gitleaks.installUrl set and scripts/install-gitleaks.sh not found"
-    fi
-
-    # PATH may have changed only in the child shell — probe common install dirs
-    for extra_bin in "$HOME/.local/bin" "/usr/local/bin"; do
-        case ":$PATH:" in
-            *":$extra_bin:"*) ;;
-            *) PATH="$extra_bin:$PATH" ;;
-        esac
-    done
-    export PATH
-
-    command -v gitleaks >/dev/null 2>&1 \
-        || fail "gitleaks still not on PATH after install. Open a new shell or add the install dir to PATH."
-
-    c_green "✓ gitleaks installed: $(gitleaks version 2>/dev/null || echo 'unknown version')"
+    echo "gitleaks not found, installing..."
+    sh "$root/scripts/install-gitleaks.sh" || exit 1
+    export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"
 fi
 
-# Use repo-local config if present
-CONFIG_ARGS=()
-[ -f "$REPO_ROOT/.gitleaks.toml" ] && CONFIG_ARGS=(--config "$REPO_ROOT/.gitleaks.toml")
+config=""
+[ -f "$root/.gitleaks.toml" ] && config="--config=$root/.gitleaks.toml"
 
-c_bold "→ Scanning staged changes for secrets (gitleaks)..."
-
-REPORT_PATH="$(mktemp -t gitleaks-report-XXXXXX.json)"
-trap 'rm -f "$REPORT_PATH"' EXIT
-
-# `protect --staged` is the gitleaks mode meant for pre-commit hooks:
-# it scans only staged changes, not the whole history.
-gitleaks protect \
-    --staged \
-    --redact \
-    --report-format json \
-    --report-path "$REPORT_PATH" \
-    "${CONFIG_ARGS[@]}"
-STATUS=$?
-
-if [ "$STATUS" -ne 0 ]; then
-    echo
-    c_red "════════════════════════════════════════════════════════════"
-    c_red "  🔒 POTENTIAL SECRETS FOUND IN STAGED CHANGES"
-    c_red "════════════════════════════════════════════════════════════"
-    echo "  Report (values redacted) saved to: $REPORT_PATH"
-    echo
-    echo "  How to fix:"
-    echo "    1. Remove the secret (git restore --staged <file> or edit the file)."
-    echo "    2. If it is a false positive, add an allowlist entry to .gitleaks.toml."
-    echo "    3. As a last resort you can bypass: git commit --no-verify"
-    echo "       (not recommended for real secrets)."
-    echo
-    fail "gitleaks detected potential secrets in the commit (exit code: ${STATUS})"
+if ! gitleaks protect --staged --redact $config; then
+    echo "Commit blocked: secrets detected. Remove them or bypass with 'git commit --no-verify'." >&2
+    exit 1
 fi
-
-c_green "✓ No secrets found. Commit allowed."
-exit 0
