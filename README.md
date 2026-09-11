@@ -36,8 +36,8 @@ Git `pre-commit` хук, який перевіряє застейджені зм
 ### Варіант 1 — встановити хук у свій проєкт (рекомендовано)
 
 ```bash
-git clone https://github.com/<your-user>/<your-repo>.git
-cd <your-repo>
+git clone https://github.com/ArturSkrin/gitleaks-precommit-hook.git
+cd gitleaks-precommit-hook
 
 # встановити хук у ЦЕЙ Ж репозиторій (для тесту) або перейти в інший проєкт:
 #   cd /шлях/до/мого/проєкту && sh /шлях/до/gitleaks-precommit-hook/scripts/setup-hook.sh
@@ -53,7 +53,7 @@ sh scripts/setup-hook.sh
 Якщо потрібен просто бінарник `gitleaks` в системі, без хука:
 
 ```bash
-curl -sSfL https://raw.githubusercontent.com/<your-user>/<your-repo>/main/scripts/install-gitleaks.sh | sh
+curl -sSfL https://raw.githubusercontent.com/ArturSkrin/gitleaks-precommit-hook/main/scripts/install-gitleaks.sh | sh
 ```
 
 Скрипт сам визначає ОС (Linux/macOS/Windows) та архітектуру (x64/arm64/...),
@@ -63,7 +63,7 @@ curl -sSfL https://raw.githubusercontent.com/<your-user>/<your-repo>/main/script
 Версію можна зафіксувати:
 
 ```bash
-GITLEAKS_VERSION=8.21.2 curl -sSfL https://raw.githubusercontent.com/<your-user>/<your-repo>/main/scripts/install-gitleaks.sh | sh
+GITLEAKS_VERSION=8.21.2 curl -sSfL https://raw.githubusercontent.com/ArturSkrin/gitleaks-precommit-hook/main/scripts/install-gitleaks.sh | sh
 ```
 
 ### Варіант 3 — просто скопіювати файл хука вручну (мінімальний, junior-рівень)
@@ -118,7 +118,7 @@ git config hooks.gitleaks.enable false
 git config hooks.gitleaks.autoinstall false
 
 # використовувати curl|sh інсталятор з конкретного URL
-git config hooks.gitleaks.installUrl "https://raw.githubusercontent.com/<your-user>/<your-repo>/main/scripts/install-gitleaks.sh"
+git config hooks.gitleaks.installUrl "https://raw.githubusercontent.com/ArturSkrin/gitleaks-precommit-hook/main/scripts/install-gitleaks.sh"
 ```
 
 Разова перевірка теж можлива без хука: `gitleaks protect --staged`.

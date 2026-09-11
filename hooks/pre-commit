@@ -3,7 +3,7 @@
 # pre-commit hook: блокує коміт, якщо у застейджених змінах знайдено секрети
 # (API-ключі, токени, паролі тощо) за допомогою gitleaks.
 #
-# Джерело / документація: https://github.com/<your-user>/<your-repo>
+# Джерело / документація: https://github.com/ArturSkrin/gitleaks-precommit-hook
 # Гілка виконання: git commit -> .git/hooks/pre-commit -> цей скрипт
 #
 # Керування через git config (усі опції мають розумні значення за замовчуванням,
