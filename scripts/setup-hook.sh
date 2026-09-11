@@ -1,10 +1,10 @@
 #!/bin/sh
-# setup-hook.sh — встановлює gitleaks pre-commit hook у поточний git-репозиторій.
+# setup-hook.sh — install the gitleaks pre-commit hook into a git repo.
 #
-# Використання:
-#   sh scripts/setup-hook.sh                    # встановити хук (типово: увімкнено, автовстановлення увімкнено)
-#   sh scripts/setup-hook.sh --disable          # встановити, але одразу вимкнути перевірку
-#   sh scripts/setup-hook.sh --no-autoinstall   # вимкнути автовстановлення gitleaks
+# Usage:
+#   sh scripts/setup-hook.sh                    # install (defaults: enabled, autoinstall on)
+#   sh scripts/setup-hook.sh --disable          # install but disable the check
+#   sh scripts/setup-hook.sh --no-autoinstall   # install but disable gitleaks auto-install
 #
 set -eu
 
@@ -12,7 +12,7 @@ SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 SOURCE_DIR="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
 
 TARGET_REPO="$(git rev-parse --show-toplevel 2>/dev/null)" || {
-    echo "Помилка: поточна тека не є git-репозиторієм (git init спочатку)" >&2
+    echo "Error: current directory is not a git repository (run 'git init' first)" >&2
     exit 1
 }
 
@@ -21,10 +21,10 @@ mkdir -p "$HOOKS_DIR"
 
 cp "$SOURCE_DIR/hooks/pre-commit" "$HOOKS_DIR/pre-commit"
 chmod +x "$HOOKS_DIR/pre-commit"
-echo "✓ pre-commit hook встановлено: $HOOKS_DIR/pre-commit"
+echo "✓ pre-commit hook installed: $HOOKS_DIR/pre-commit"
 
-# Якщо хук встановлюється в ІНШИЙ проєкт (не в цей репозиторій), копіюємо
-# також install-gitleaks.sh та .gitleaks.toml, щоб хук працював автономно.
+# When installing into a different project, also copy the installer and config
+# so the hook is self-contained there.
 if [ "$TARGET_REPO" != "$SOURCE_DIR" ]; then
     mkdir -p "$TARGET_REPO/scripts"
     if [ ! -f "$TARGET_REPO/scripts/install-gitleaks.sh" ]; then
@@ -40,17 +40,18 @@ for arg in "$@"; do
     case "$arg" in
         --disable)
             git -C "$TARGET_REPO" config hooks.gitleaks.enable false
-            echo "⚠ Перевірку gitleaks вимкнено (hooks.gitleaks.enable=false)"
+            echo "⚠ gitleaks check disabled (hooks.gitleaks.enable=false)"
             ;;
         --no-autoinstall)
             git -C "$TARGET_REPO" config hooks.gitleaks.autoinstall false
-            echo "⚠ Автовстановлення gitleaks вимкнено (hooks.gitleaks.autoinstall=false)"
+            echo "⚠ gitleaks auto-install disabled (hooks.gitleaks.autoinstall=false)"
             ;;
         *)
-            echo "Невідомий аргумент: $arg (ігнорується)" >&2
+            echo "Unknown argument: $arg (ignored)" >&2
             ;;
     esac
 done
 
-echo "Готово. Поточні налаштування:"
-git -C "$TARGET_REPO" config --get-regexp '^hooks\.gitleaks\.' 2>/dev/null || echo "  (усі опції за замовчуванням: enable=true, autoinstall=true)"
+echo "Done. Current settings:"
+git -C "$TARGET_REPO" config --get-regexp '^hooks\.gitleaks\.' 2>/dev/null \
+    || echo "  (all defaults: enable=true, autoinstall=true)"

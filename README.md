@@ -1,142 +1,137 @@
 # gitleaks-precommit-hook
 
-Git `pre-commit` хук, який перевіряє застейджені зміни на наявність секретів
-(API-ключі, токени, паролі, приватні ключі тощо) за допомогою
-[gitleaks](https://github.com/gitleaks/gitleaks) і **відхиляє коміт**, якщо
-секрет знайдено.
+A git `pre-commit` hook that scans staged changes for secrets (API keys,
+tokens, passwords, private keys, etc.) using
+[gitleaks](https://github.com/gitleaks/gitleaks) and **rejects the commit** if
+any secret is found.
 
-Реалізовано з автоматичним встановленням gitleaks залежно від операційної
-системи (Linux / macOS / Windows), опцією `enable`/`disable` через
-`git config`, та інсталятором у форматі `curl | sh`.
+Features OS-aware auto-install of gitleaks (Linux / macOS / Windows), an
+`enable`/`disable` toggle via `git config`, and a `curl | sh` style installer.
 
-## Структура репозиторію
+## Layout
 
 ```
 .
 ├── hooks/
-│   └── pre-commit            # сам git-хук (bash)
+│   └── pre-commit            # the git hook (bash)
 ├── scripts/
-│   ├── install-gitleaks.sh   # крос-платформний інсталятор gitleaks (curl | sh)
-│   └── setup-hook.sh         # встановлює hooks/pre-commit у .git/hooks/ поточного репо
+│   ├── install-gitleaks.sh   # cross-platform gitleaks installer (curl | sh)
+│   └── setup-hook.sh         # installs hooks/pre-commit into a repo's .git/hooks
 ├── test/
-│   └── demo.sh                # автоматична демонстрація на прикладі Telegram bot token
-├── .gitleaks.toml             # конфіг gitleaks: стандартні правила + Telegram Bot Token
+│   └── demo.sh               # automated demo using a Telegram bot token
+├── .gitleaks.toml            # gitleaks config: default rules + Telegram Bot Token
 └── README.md
 ```
 
-## Вимоги
+## Requirements
 
-- `git`, `bash`/`sh`, `curl`, `tar` (стандартно є в Linux/macOS; у Windows —
-  через Git Bash/WSL).
-- Інтернет-доступ **лише один раз**, якщо `gitleaks` ще не встановлений на
-  машині (для автовстановлення). Далі хук працює офлайн.
+- `git`, `bash`/`sh`, `curl`, `tar` (standard on Linux/macOS; on Windows use
+  Git Bash or WSL).
+- Network access **once**, only if `gitleaks` is not installed yet (for
+  auto-install). After that the hook works offline.
 
-## Швидкий старт
+## Quick start
 
-### Варіант 1 — встановити хук у свій проєкт (рекомендовано)
+### Option 1 — install the hook into your project (recommended)
 
 ```bash
 git clone https://github.com/ArturSkrin/gitleaks-precommit-hook.git
 cd gitleaks-precommit-hook
 
-# встановити хук у ЦЕЙ Ж репозиторій (для тесту) або перейти в інший проєкт:
-#   cd /шлях/до/мого/проєкту && sh /шлях/до/gitleaks-precommit-hook/scripts/setup-hook.sh
+# install into THIS repo (to try it), or cd into another project first:
+#   cd /path/to/my/project && sh /path/to/gitleaks-precommit-hook/scripts/setup-hook.sh
 sh scripts/setup-hook.sh
 ```
 
-Це скопіює `hooks/pre-commit` у `.git/hooks/pre-commit` цільового репозиторію
-(і, якщо хук встановлюється в інший проєкт, — також `install-gitleaks.sh` та
-`.gitleaks.toml`, щоб хук працював автономно).
+This copies `hooks/pre-commit` into the target repo's `.git/hooks/pre-commit`
+(and, when installing into a different project, also copies
+`install-gitleaks.sh` and `.gitleaks.toml` so the hook is self-contained).
 
-### Варіант 2 — встановити лише gitleaks (curl | sh)
+### Option 2 — install only gitleaks (curl | sh)
 
-Якщо потрібен просто бінарник `gitleaks` в системі, без хука:
+If you just want the `gitleaks` binary, without the hook:
 
 ```bash
 curl -sSfL https://raw.githubusercontent.com/ArturSkrin/gitleaks-precommit-hook/main/scripts/install-gitleaks.sh | sh
 ```
 
-Скрипт сам визначає ОС (Linux/macOS/Windows) та архітектуру (x64/arm64/...),
-завантажує відповідний реліз з GitHub і встановлює бінарник у
-`/usr/local/bin` (або `~/.local/bin`, якщо немає прав запису/sudo).
+The script detects the OS (Linux/macOS/Windows) and architecture
+(x64/arm64/...), downloads the matching GitHub release, and installs the binary
+to `/usr/local/bin` (or `~/.local/bin` if there is no write access / sudo).
 
-Версію можна зафіксувати:
+Pin a specific version:
 
 ```bash
 GITLEAKS_VERSION=8.21.2 curl -sSfL https://raw.githubusercontent.com/ArturSkrin/gitleaks-precommit-hook/main/scripts/install-gitleaks.sh | sh
 ```
 
-### Варіант 3 — просто скопіювати файл хука вручну (мінімальний, junior-рівень)
+### Option 3 — copy the hook file manually (minimal)
 
 ```bash
-cp hooks/pre-commit /шлях/до/проєкту/.git/hooks/pre-commit
-chmod +x /шлях/до/проєкту/.git/hooks/pre-commit
+cp hooks/pre-commit /path/to/project/.git/hooks/pre-commit
+chmod +x /path/to/project/.git/hooks/pre-commit
 ```
 
-Підходить, якщо `gitleaks` уже встановлений локально вручну
-(`brew install gitleaks`, `apt install gitleaks`, і т.д.) — автовстановлення
-в такому разі просто не спрацює, бо бінарник вже є в PATH.
+Fine if `gitleaks` is already installed manually (`brew install gitleaks`,
+`apt install gitleaks`, etc.) — auto-install simply won't trigger.
 
-## Як це працює
+## How it works
 
-1. При кожному `git commit` git автоматично запускає `.git/hooks/pre-commit`.
-2. Хук перевіряє `git config hooks.gitleaks.enable` — якщо `false`, перевірка
-   пропускається.
-3. Якщо `gitleaks` не знайдено в `PATH`, а `hooks.gitleaks.autoinstall` не
-   вимкнено (`false`), хук автоматично встановлює його:
-   - якщо в репозиторії є `scripts/install-gitleaks.sh` — виконує його локально;
-   - якщо задано `git config hooks.gitleaks.installUrl <url>` — тягне
-     інсталятор через `curl -sSfL <url> | sh` (класичний спосіб дистрибуції
-     CLI-тулзів, як `get.docker.com`, `rustup.rs` тощо).
-4. Хук запускає `gitleaks protect --staged --redact` (режим, спеціально
-   призначений gitleaks для pre-commit hooks — перевіряє тільки застейджені
-   зміни, а не всю історію) з конфігом `.gitleaks.toml`, якщо він є в
-   репозиторії.
-5. Якщо gitleaks знайшов секрет — виводиться повідомлення про помилку, звіт
-   зберігається у тимчасовий JSON-файл, і **коміт відхиляється** (`exit 1`).
-6. Якщо секретів немає — коміт проходить як завжди.
+1. On every `git commit`, git runs `.git/hooks/pre-commit`.
+2. The hook checks `git config hooks.gitleaks.enable` — if `false`, it skips.
+3. If `gitleaks` is not on `PATH` and `hooks.gitleaks.autoinstall` is not
+   `false`, the hook installs it:
+   - if `scripts/install-gitleaks.sh` exists in the repo, it runs it locally;
+   - if `git config hooks.gitleaks.installUrl <url>` is set, it fetches the
+     installer via `curl -sSfL <url> | sh` (the classic way CLI tools are
+     distributed, like `get.docker.com` or `rustup.rs`).
+4. The hook runs `gitleaks protect --staged --redact` (the mode gitleaks
+   provides specifically for pre-commit hooks — it scans only staged changes,
+   not the whole history) with `.gitleaks.toml` if present.
+5. If gitleaks finds a secret, it prints an error, saves a redacted JSON
+   report, and **rejects the commit** (`exit 1`).
+6. If nothing is found, the commit proceeds as usual.
 
-## Налаштування через `git config`
+## Configuration via `git config`
 
-Усі опції мають робочі значення за замовчуванням — нічого налаштовувати не
-обов'язково.
+All options have working defaults — nothing needs to be configured.
 
-| Ключ | Значення | За замовчуванням | Опис |
+| Key | Value | Default | Description |
 |---|---|---|---|
-| `hooks.gitleaks.enable` | `true` / `false` | `true` | Вмикає/вимикає перевірку повністю |
-| `hooks.gitleaks.autoinstall` | `true` / `false` | `true` | Дозволяє хуку самостійно встановлювати gitleaks, якщо він відсутній |
-| `hooks.gitleaks.installUrl` | URL | — (порожньо → локальний `scripts/install-gitleaks.sh`) | Звідки тягнути інсталятор через `curl \| sh` |
-| `hooks.gitleaks.version` | напр. `8.21.2` | `latest` | Версія gitleaks (див. `GITLEAKS_VERSION` в install-скрипті) |
+| `hooks.gitleaks.enable` | `true` / `false` | `true` | Enable/disable the check entirely |
+| `hooks.gitleaks.autoinstall` | `true` / `false` | `true` | Let the hook install gitleaks if missing |
+| `hooks.gitleaks.installUrl` | URL | — (empty → local `scripts/install-gitleaks.sh`) | Source for the `curl \| sh` installer |
+| `hooks.gitleaks.version` | e.g. `8.21.2` | `latest` | gitleaks version (see `GITLEAKS_VERSION` in the installer) |
 
-Приклади:
+Examples:
 
 ```bash
-# тимчасово вимкнути перевірку в конкретному репозиторії
+# temporarily disable the check in a repo
 git config hooks.gitleaks.enable false
 
-# заборонити авто-встановлення (якщо адміністратор хоче ставити gitleaks сам)
+# forbid auto-install (e.g. admin installs gitleaks themselves)
 git config hooks.gitleaks.autoinstall false
 
-# використовувати curl|sh інсталятор з конкретного URL
+# use the curl|sh installer from a specific URL
 git config hooks.gitleaks.installUrl "https://raw.githubusercontent.com/ArturSkrin/gitleaks-precommit-hook/main/scripts/install-gitleaks.sh"
 ```
 
-Разова перевірка теж можлива без хука: `gitleaks protect --staged`.
+A one-off manual scan is also possible without the hook: `gitleaks protect --staged`.
 
-Обхід перевірки для одного коміту (стандартна поведінка git, не пов'язана з
-цим хуком): `git commit --no-verify`.
+Bypass the check for a single commit (standard git behaviour, unrelated to this
+hook): `git commit --no-verify`.
 
-## Тестування на прикладі Telegram Bot Token
+## Testing with a Telegram Bot Token
 
-Автоматичний скрипт (`test/demo.sh`) створює тимчасовий репозиторій,
-встановлює хук і перевіряє обидва сценарії — коміт із секретом (має бути
-відхилений) і коміт без секрету (має пройти):
+The automated script (`test/demo.sh`) creates a temporary repo, installs the
+hook, and checks both scenarios — a commit with a secret (must be rejected) and
+a commit without (must pass):
 
 ```bash
 sh test/demo.sh
 ```
 
-### Ручна перевірка крок за кроком
+### Manual walkthrough
 
 ```bash
 mkdir /tmp/demo && cd /tmp/demo
@@ -144,39 +139,35 @@ git init
 git config user.email you@example.com
 git config user.name "Your Name"
 
-# встановлюємо хук (шлях — до цього репозиторію)
-sh /шлях/до/gitleaks-precommit-hook/scripts/setup-hook.sh
+# install the hook (path points to this repo)
+sh /path/to/gitleaks-precommit-hook/scripts/setup-hook.sh
 
-# "витік" Telegram bot token (це офіційний приклад-плейсхолдер із
-# документації Telegram Bot API, а не реальний токен)
+# "leak" a Telegram bot token (this is the official placeholder example from
+# the Telegram Bot API docs, not a real token)
 echo 'TELEGRAM_BOT_TOKEN = "110201543:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw"' > config.py
 
 git add config.py
 git commit -m "add bot config"
 ```
 
-Очікуваний результат — коміт відхилено, приблизно такий вивід:
+Expected result — the commit is rejected, roughly like:
 
 ```
-→ Перевірка застейджених змін на наявність секретів (gitleaks)...
+→ Scanning staged changes for secrets (gitleaks)...
 
     Finding:     TELEGRAM_BOT_TOKEN = "REDACTED"
-    Secret:      REDACTED
     RuleID:      telegram-bot-token
-    Entropy:     X.XX
     File:        config.py
-    Line:        1
 
 ════════════════════════════════════════════════════════════
-  🔒 ЗНАЙДЕНО ПОТЕНЦІЙНІ СЕКРЕТИ У ЗАСТЕЙДЖЕНИХ ЗМІНАХ
+  🔒 POTENTIAL SECRETS FOUND IN STAGED CHANGES
 ════════════════════════════════════════════════════════════
   ...
-✗ КОМІТ ВІДХИЛЕНО
-  Причина: gitleaks виявив потенційні секрети у коміті (exit code: 1)
+✗ COMMIT REJECTED
+  Reason: gitleaks detected potential secrets in the commit (exit code: 1)
 ```
 
-Прибираємо секрет (наприклад, читаємо токен зі змінної середовища) — коміт
-проходить:
+Remove the secret (e.g. read the token from an env var) and the commit passes:
 
 ```bash
 cat > config.py <<'EOF'
@@ -185,36 +176,35 @@ TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 EOF
 git add config.py
 git commit -m "read token from env"
-# ✓ Секретів не знайдено. Коміт дозволено.
+# ✓ No secrets found. Commit allowed.
 ```
 
-## Що робити при хибному спрацюванні (false positive)
+## Handling false positives
 
-Додай виняток у `.gitleaks.toml` (секція `[[rules.allowlist]]` для конкретного
-правила, або `[allowlist]` глобально — див.
-[документацію gitleaks](https://github.com/gitleaks/gitleaks#configuration)),
-або одноразово обійди перевірку через `git commit --no-verify` (з обережністю).
+Add an exception to `.gitleaks.toml` (a `[[rules.allowlist]]` block for a
+specific rule, or a global `[allowlist]` — see the
+[gitleaks docs](https://github.com/gitleaks/gitleaks#configuration)), or bypass
+once with `git commit --no-verify` (use with care).
 
-## Відповідність рівням завдання
+## Grading criteria mapping
 
-| Рівень | Вимога | Де реалізовано |
+| Level | Requirement | Where |
 |---|---|---|
-| Junior (3 б.) | pre-commit hook з локально встановленим gitleaks | `hooks/pre-commit` працює з будь-яким `gitleaks` у `PATH` (Варіант 3 вище) |
-| Middle (7 б.) | + автовстановлення gitleaks залежно від ОС, опція `enable` через `git config` | `scripts/install-gitleaks.sh` (визначення ОС/архітектури) + `hooks.gitleaks.enable`/`autoinstall` у `hooks/pre-commit` |
-| Senior (10 б.) | + інсталяція методом `curl \| sh` | `scripts/install-gitleaks.sh` розроблений як самостійний `curl -sSfL <url> \| sh` інсталятор (як у docker/rustup); хук може підтягувати його саме так через `hooks.gitleaks.installUrl` |
+| Junior (3 pts) | pre-commit hook with locally installed gitleaks | `hooks/pre-commit` works with any `gitleaks` on `PATH` (Option 3) |
+| Middle (7 pts) | + OS-aware auto-install, `enable` toggle via `git config` | `scripts/install-gitleaks.sh` (OS/arch detection) + `hooks.gitleaks.enable`/`autoinstall` in `hooks/pre-commit` |
+| Senior (10 pts) | + `curl \| sh` installation | `scripts/install-gitleaks.sh` is a standalone `curl -sSfL <url> \| sh` installer (docker/rustup style); the hook can pull it exactly that way via `hooks.gitleaks.installUrl` |
 
-## Обмеження / нотатки
+## Notes / limitations
 
-- `install-gitleaks.sh` качає бінарник з GitHub Releases проєкту
-  `gitleaks/gitleaks`, тому для першого встановлення потрібен інтернет.
-  Наступні коміти вже не залежать від мережі.
-- Правило для Telegram Bot Token додане явно в `.gitleaks.toml` (окрім
-  стандартного набору правил gitleaks), щоб гарантовано ловити формат
-  `<bot_id>:<35 символів>` незалежно від версії gitleaks.
-- Скрипти написані на bash (`hooks/pre-commit`, `test/demo.sh`) та POSIX
-  `sh` (`scripts/install-gitleaks.sh`, `scripts/setup-hook.sh`) для
-  максимальної сумісності.
+- `install-gitleaks.sh` downloads the binary from the `gitleaks/gitleaks`
+  GitHub Releases, so the first install needs network access. Subsequent
+  commits do not.
+- The Telegram Bot Token rule is added explicitly in `.gitleaks.toml` (on top
+  of the default gitleaks rule set) to reliably catch the
+  `<bot_id>:<~35 chars>` format regardless of the gitleaks version.
+- Scripts are written in bash (`hooks/pre-commit`) and POSIX `sh`
+  (`scripts/*.sh`, `test/demo.sh`) for broad compatibility.
 
-## Ліцензія
+## License
 
-MIT — див. [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE).

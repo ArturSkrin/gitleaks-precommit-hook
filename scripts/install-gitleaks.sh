@@ -1,20 +1,17 @@
 #!/bin/sh
-# install-gitleaks.sh — крос-платформний інсталятор gitleaks.
+# install-gitleaks.sh — cross-platform gitleaks installer.
 #
-# Призначений для запуску у стилі "curl | sh" (як get.docker.com, rustup.rs тощо):
+# Meant to be run "curl | sh" style:
+#   curl -sSfL https://raw.githubusercontent.com/ArturSkrin/gitleaks-precommit-hook/main/scripts/install-gitleaks.sh | sh
 #
-#   curl -sSfL https://raw.githubusercontent.com/<your-user>/<your-repo>/main/scripts/install-gitleaks.sh | sh
-#
-# Також може виконуватись локально після клонування репозиторію:
-#
+# Or locally after cloning:
 #   sh scripts/install-gitleaks.sh
 #
-# Змінні середовища:
-#   GITLEAKS_VERSION      - конкретна версія без "v", напр. "8.21.2" (default: latest)
-#   GITLEAKS_INSTALL_DIR  - куди встановлювати бінарник (default: /usr/local/bin або ~/.local/bin)
+# Env vars:
+#   GITLEAKS_VERSION      version without "v", e.g. "8.21.2" (default: latest)
+#   GITLEAKS_INSTALL_DIR  install target (default: /usr/local/bin or ~/.local/bin)
 #
-# Скрипт навмисно POSIX sh (без bash-специфічних конструкцій), щоб працювати
-# в /bin/sh, dash, ash (Alpine), git-bash тощо.
+# POSIX sh on purpose (no bashisms) so it runs under dash, ash, git-bash, etc.
 
 set -eu
 
@@ -23,10 +20,10 @@ API_BASE="https://api.github.com/repos/${REPO}/releases"
 VERSION="${GITLEAKS_VERSION:-latest}"
 
 log() { printf '[install-gitleaks] %s\n' "$1"; }
-err() { printf '[install-gitleaks] ПОМИЛКА: %s\n' "$1" >&2; exit 1; }
+err() { printf '[install-gitleaks] ERROR: %s\n' "$1" >&2; exit 1; }
 
 need_cmd() {
-    command -v "$1" >/dev/null 2>&1 || err "потрібна утиліта '$1', але вона не знайдена в PATH"
+    command -v "$1" >/dev/null 2>&1 || err "required command '$1' not found on PATH"
 }
 
 need_cmd curl
@@ -35,20 +32,16 @@ need_cmd mktemp
 need_cmd sed
 need_cmd grep
 
-# ---------------------------------------------------------------------------
-# 1. Визначення ОС
-# ---------------------------------------------------------------------------
+# Detect OS
 OS_RAW="$(uname -s)"
 case "$OS_RAW" in
-    Linux*)                OS="linux" ;;
+    Linux*)                 OS="linux" ;;
     Darwin*)                OS="darwin" ;;
     MINGW*|MSYS*|CYGWIN*)   OS="windows" ;;
-    *) err "непідтримувана операційна система: $OS_RAW" ;;
+    *) err "unsupported OS: $OS_RAW" ;;
 esac
 
-# ---------------------------------------------------------------------------
-# 2. Визначення архітектури (з альтернативними назвами для пошуку у релізі)
-# ---------------------------------------------------------------------------
+# Detect arch (with alternate names to match different release naming)
 ARCH_RAW="$(uname -m)"
 case "$ARCH_RAW" in
     x86_64|amd64)   ARCH_PATTERNS="x64 amd64 x86_64" ;;
@@ -56,7 +49,7 @@ case "$ARCH_RAW" in
     armv7l|armv7)   ARCH_PATTERNS="armv7 arm7" ;;
     armv6l)         ARCH_PATTERNS="armv6 arm6" ;;
     i386|i686)      ARCH_PATTERNS="x32 386 i386" ;;
-    *) err "непідтримувана архітектура: $ARCH_RAW" ;;
+    *) err "unsupported architecture: $ARCH_RAW" ;;
 esac
 
 if [ "$OS" = "windows" ]; then
@@ -67,30 +60,26 @@ else
     BIN_NAME="gitleaks"
 fi
 
-# ---------------------------------------------------------------------------
-# 3. Отримання інформації про реліз з GitHub API
-# ---------------------------------------------------------------------------
+# Resolve the release to install
 if [ "$VERSION" = "latest" ]; then
     RELEASE_URL="${API_BASE}/latest"
 else
     RELEASE_URL="${API_BASE}/tags/v${VERSION}"
 fi
 
-log "Отримую інформацію про реліз: $RELEASE_URL"
+log "Fetching release info: $RELEASE_URL"
 RELEASE_JSON="$(curl -sSfL -H 'Accept: application/vnd.github+json' "$RELEASE_URL")" \
-    || err "не вдалося звернутись до GitHub API ($RELEASE_URL). Перевір інтернет-з'єднання."
+    || err "GitHub API request failed ($RELEASE_URL). Check your connection."
 
 TAG="$(printf '%s' "$RELEASE_JSON" | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name":[[:space:]]*"([^"]+)".*/\1/')"
-[ -n "$TAG" ] || err "не вдалося визначити тег релізу з відповіді GitHub API"
+[ -n "$TAG" ] || err "could not parse release tag from GitHub API response"
 
 ASSET_URLS="$(printf '%s' "$RELEASE_JSON" \
     | grep -o '"browser_download_url":[[:space:]]*"[^"]*"' \
     | sed -E 's/.*"(https:\/\/[^"]+)"$/\1/')"
-[ -n "$ASSET_URLS" ] || err "у релізі $TAG не знайдено жодного asset-файлу"
+[ -n "$ASSET_URLS" ] || err "no release assets found for $TAG"
 
-# ---------------------------------------------------------------------------
-# 4. Пошук потрібного asset (OS + архітектура), без жорстко зашитого формату імені
-# ---------------------------------------------------------------------------
+# Pick the asset matching OS + arch (no hard-coded filename format)
 DOWNLOAD_URL=""
 for arch_pat in $ARCH_PATTERNS; do
     candidate="$(printf '%s\n' "$ASSET_URLS" \
@@ -105,35 +94,26 @@ for arch_pat in $ARCH_PATTERNS; do
     fi
 done
 
-[ -n "$DOWNLOAD_URL" ] || err "не знайдено відповідного бінарника для ОС='$OS' архітектура='$ARCH_RAW' у релізі $TAG"
+[ -n "$DOWNLOAD_URL" ] || err "no matching binary for OS='$OS' arch='$ARCH_RAW' in release $TAG"
 
-# ---------------------------------------------------------------------------
-# 5. Завантаження та розпакування
-# ---------------------------------------------------------------------------
+# Download and unpack
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
 
 ARCHIVE="$WORKDIR/gitleaks.$EXT"
-log "Завантажую $DOWNLOAD_URL"
-curl -sSfL -o "$ARCHIVE" "$DOWNLOAD_URL" || err "не вдалося завантажити $DOWNLOAD_URL"
+log "Downloading $DOWNLOAD_URL"
+curl -sSfL -o "$ARCHIVE" "$DOWNLOAD_URL" || err "failed to download $DOWNLOAD_URL"
 
 case "$EXT" in
-    tar.gz)
-        tar -xzf "$ARCHIVE" -C "$WORKDIR"
-        ;;
-    zip)
-        need_cmd unzip
-        unzip -q "$ARCHIVE" -d "$WORKDIR"
-        ;;
+    tar.gz) tar -xzf "$ARCHIVE" -C "$WORKDIR" ;;
+    zip)    need_cmd unzip; unzip -q "$ARCHIVE" -d "$WORKDIR" ;;
 esac
 
 BIN_PATH="$(find "$WORKDIR" -type f -name "$BIN_NAME" | head -n1)"
-[ -n "$BIN_PATH" ] || err "у розпакованому архіві не знайдено файл $BIN_NAME"
+[ -n "$BIN_PATH" ] || err "$BIN_NAME not found in the extracted archive"
 chmod +x "$BIN_PATH"
 
-# ---------------------------------------------------------------------------
-# 6. Встановлення у теку з PATH
-# ---------------------------------------------------------------------------
+# Choose an install dir on PATH
 USE_SUDO=0
 if [ -n "${GITLEAKS_INSTALL_DIR:-}" ]; then
     INSTALL_DIR="$GITLEAKS_INSTALL_DIR"
@@ -152,24 +132,23 @@ TARGET="$INSTALL_DIR/gitleaks"
 [ "$OS" = "windows" ] && TARGET="$INSTALL_DIR/gitleaks.exe"
 
 if [ "$USE_SUDO" = "1" ]; then
-    log "Встановлюю у $TARGET (через sudo)"
+    log "Installing to $TARGET (via sudo)"
     sudo mkdir -p "$INSTALL_DIR"
     sudo cp "$BIN_PATH" "$TARGET"
     sudo chmod +x "$TARGET"
 else
-    log "Встановлюю у $TARGET"
+    log "Installing to $TARGET"
     cp "$BIN_PATH" "$TARGET"
     chmod +x "$TARGET"
 fi
 
 case ":$PATH:" in
-    *":$INSTALL_DIR:"*)
-        ;;
+    *":$INSTALL_DIR:"*) ;;
     *)
-        log "УВАГА: $INSTALL_DIR відсутній у PATH."
-        log "Додай у ~/.bashrc, ~/.zshrc або аналог:  export PATH=\"$INSTALL_DIR:\$PATH\""
+        log "NOTE: $INSTALL_DIR is not on PATH."
+        log "Add to your shell rc:  export PATH=\"$INSTALL_DIR:\$PATH\""
         ;;
 esac
 
-log "gitleaks ${TAG} встановлено успішно: $TARGET"
+log "gitleaks ${TAG} installed: $TARGET"
 "$TARGET" version 2>/dev/null || true
