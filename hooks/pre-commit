@@ -1,0 +1,143 @@
+#!/usr/bin/env bash
+#
+# pre-commit hook: блокує коміт, якщо у застейджених змінах знайдено секрети
+# (API-ключі, токени, паролі тощо) за допомогою gitleaks.
+#
+# Джерело / документація: https://github.com/<your-user>/<your-repo>
+# Гілка виконання: git commit -> .git/hooks/pre-commit -> цей скрипт
+#
+# Керування через git config (усі опції мають розумні значення за замовчуванням,
+# тому нічого налаштовувати не обов'язково):
+#
+#   git config hooks.gitleaks.enable      true|false   # вкл/викл перевірку (default: true)
+#   git config hooks.gitleaks.autoinstall true|false   # авто-встановлення gitleaks, якщо відсутній (default: true)
+#   git config hooks.gitleaks.installUrl  <url>        # звідки тягнути install-gitleaks.sh (curl | sh)
+#   git config hooks.gitleaks.version     <version>    # версія gitleaks, напр. "8.21.2" (default: latest)
+#
+set -u
+
+# ---------------------------------------------------------------------------
+# Допоміжні функції виводу
+# ---------------------------------------------------------------------------
+c_red()    { printf '\033[31m%s\033[0m\n' "$1"; }
+c_green()  { printf '\033[32m%s\033[0m\n' "$1"; }
+c_yellow() { printf '\033[33m%s\033[0m\n' "$1"; }
+c_bold()   { printf '\033[1m%s\033[0m\n' "$1"; }
+
+fail() {
+    echo
+    c_red   "✗ КОМІТ ВІДХИЛЕНО"
+    c_red   "  Причина: $1"
+    echo
+    exit 1
+}
+
+# ---------------------------------------------------------------------------
+# 0. Знаходимо корінь репозиторію
+# ---------------------------------------------------------------------------
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
+if [ -z "$REPO_ROOT" ]; then
+    fail "не вдалося визначити корінь git-репозиторію"
+fi
+cd "$REPO_ROOT" || fail "не вдалося перейти у $REPO_ROOT"
+
+# ---------------------------------------------------------------------------
+# 1. Опція enable/disable через git config
+# ---------------------------------------------------------------------------
+ENABLE="$(git config --get hooks.gitleaks.enable 2>/dev/null || true)"
+if [ "$ENABLE" = "false" ] || [ "$ENABLE" = "0" ]; then
+    c_yellow "⚠ gitleaks pre-commit перевірку вимкнено (git config hooks.gitleaks.enable=false) — пропускаємо."
+    exit 0
+fi
+
+AUTOINSTALL="$(git config --get hooks.gitleaks.autoinstall 2>/dev/null || true)"
+if [ -z "$AUTOINSTALL" ]; then
+    AUTOINSTALL="true"
+fi
+
+INSTALL_URL="$(git config --get hooks.gitleaks.installUrl 2>/dev/null || true)"
+
+# ---------------------------------------------------------------------------
+# 2. Перевіряємо, чи встановлено gitleaks; якщо ні — авто-встановлення
+# ---------------------------------------------------------------------------
+if ! command -v gitleaks >/dev/null 2>&1; then
+    if [ "$AUTOINSTALL" = "false" ] || [ "$AUTOINSTALL" = "0" ]; then
+        fail "gitleaks не встановлено, а автовстановлення вимкнено (hooks.gitleaks.autoinstall=false).
+  Встанови вручну: https://github.com/gitleaks/gitleaks#installing"
+    fi
+
+    c_yellow "gitleaks не знайдено в PATH. Запускаю автоматичне встановлення..."
+
+    INSTALLER_LOCAL="$REPO_ROOT/scripts/install-gitleaks.sh"
+
+    if [ -n "$INSTALL_URL" ]; then
+        # Явно заданий URL має пріоритет: скачуємо і виконуємо (curl | sh)
+        c_yellow "  -> curl -sSfL '$INSTALL_URL' | sh"
+        if ! curl -sSfL "$INSTALL_URL" | sh; then
+            fail "не вдалося встановити gitleaks через $INSTALL_URL"
+        fi
+    elif [ -f "$INSTALLER_LOCAL" ]; then
+        # Локальний інсталятор всередині цього репозиторію (працює одразу після клонування)
+        c_yellow "  -> sh '$INSTALLER_LOCAL'"
+        if ! sh "$INSTALLER_LOCAL"; then
+            fail "локальний install-gitleaks.sh завершився з помилкою"
+        fi
+    else
+        fail "не знайдено ні hooks.gitleaks.installUrl, ні scripts/install-gitleaks.sh"
+    fi
+
+    # PATH міг оновитися лише в дочірньому процесі — додатково перевіряємо типові місця встановлення
+    for extra_bin in "$HOME/.local/bin" "/usr/local/bin"; do
+        case ":$PATH:" in
+            *":$extra_bin:"*) ;;
+            *) PATH="$extra_bin:$PATH" ;;
+        esac
+    done
+    export PATH
+
+    if ! command -v gitleaks >/dev/null 2>&1; then
+        fail "gitleaks все ще не знайдено в PATH після встановлення. Відкрий новий термінал або додай теку встановлення до PATH."
+    fi
+
+    c_green "✓ gitleaks успішно встановлено: $(gitleaks version 2>/dev/null || echo 'версія невідома')"
+fi
+
+# ---------------------------------------------------------------------------
+# 3. Запуск перевірки застейджених змін
+# ---------------------------------------------------------------------------
+CONFIG_ARGS=()
+if [ -f "$REPO_ROOT/.gitleaks.toml" ]; then
+    CONFIG_ARGS=(--config "$REPO_ROOT/.gitleaks.toml")
+fi
+
+c_bold "→ Перевірка застейджених змін на наявність секретів (gitleaks)..."
+
+REPORT_PATH="$(mktemp -t gitleaks-report-XXXXXX.json)"
+trap 'rm -f "$REPORT_PATH"' EXIT
+
+gitleaks protect \
+    --staged \
+    --redact \
+    --report-format json \
+    --report-path "$REPORT_PATH" \
+    "${CONFIG_ARGS[@]}"
+STATUS=$?
+
+if [ "$STATUS" -ne 0 ]; then
+    echo
+    c_red "════════════════════════════════════════════════════════════"
+    c_red "  🔒 ЗНАЙДЕНО ПОТЕНЦІЙНІ СЕКРЕТИ У ЗАСТЕЙДЖЕНИХ ЗМІНАХ"
+    c_red "════════════════════════════════════════════════════════════"
+    echo "  Деталі (значення редаговані) збережено у: $REPORT_PATH"
+    echo
+    echo "  Що робити:"
+    echo "    1. Прибери секрет із коду (git restore --staged <файл> або відредагуй файл)."
+    echo "    2. Якщо це не секрет, а хибне спрацювання — онов .gitleaks.toml (allowlist)."
+    echo "    3. У крайньому разі можна обійти перевірку: git commit --no-verify"
+    echo "       (НЕ рекомендується для реальних секретів)."
+    echo
+    fail "gitleaks виявив потенційні секрети у коміті (exit code: ${STATUS})"
+fi
+
+c_green "✓ Секретів не знайдено. Коміт дозволено."
+exit 0
